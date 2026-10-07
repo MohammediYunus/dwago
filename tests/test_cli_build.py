@@ -1,5 +1,6 @@
 """CLI build confirmation must preserve the store's atomic publication."""
 from contextlib import closing
+import json
 
 import numpy as np
 import pytest
@@ -7,6 +8,21 @@ import pytest
 from dwago.cli import main
 from dwago.index import dense
 from dwago.store import Store
+
+
+def test_lexical_query_returns_decorated_function_once(tmp_path, capsys):
+    (tmp_path / "tools.py").write_text(
+        "@tool\n"
+        "async def read_console():\n"
+        '    """Read the editor console."""\n'
+        "    return []\n")
+    assert main(["build", str(tmp_path), "--embed-backend", "none", "--no-git"]) == 0
+    capsys.readouterr()
+    assert main(["ask", "read_console", str(tmp_path), "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    hits = [hit for hit in result["hits"] if hit["label"] == "read_console"]
+    assert len(hits) == 1, "one decorated source definition must occupy one search result"
+    assert (hits[0]["start_line"], hits[0]["end_line"]) == (1, 4)
 
 
 @pytest.fixture
