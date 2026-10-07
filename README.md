@@ -64,8 +64,10 @@ the bare network. Key files rings the hotspots git complains about most.
 
 ## Install
 
+Requires Python 3.10 or newer.
+
 ```bash
-uv tool install "dwago[lexical,fast,mcp] @ git+https://github.com/Dwago20/dwago"
+uv tool install "dwago[lexical,fast,mcp] @ git+https://github.com/MohammediYunus/dwago"
 ```
 
 From a clone, `pip install -e ".[lexical,fast,mcp]"`. Swap `fast` for `dense`
@@ -116,7 +118,13 @@ communities and the whole git layer. If you already have a node-link
 ingestion would make it exact. Co-change is correlation, and the tool reports
 lift and p-values so you can judge. The small encoder trades accuracy for
 speed, measurably. Above 200k nodes, nearest-neighbor search still needs an
-ANN index I haven't wired in. 67 tests cover what's here today.
+ANN index I haven't wired in. Tests cover extraction, retrieval, storage,
+graph tools, and visualization.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the local setup, test commands,
+and guidance for bug reports and focused pull requests.
 
 ## License
 
