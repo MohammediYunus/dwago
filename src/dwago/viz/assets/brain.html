@@ -1327,9 +1327,12 @@ function showCard(i){
   const n=neurons[i];
   const nb=adj[i].slice(0,3).map(k=>{const[a,b]=edges[k];return neurons[a===i?b:a].name;});
   const card=document.getElementById('card');
-  card.innerHTML=`<b>${n.name}</b><span>${n.path}</span>`+
-    `<em>${REGION_NAME[n.c]} · ${DIRS[n.c]} · ${adj[i].length} links</em>`+
-    (nb.length?`<i>linked: ${nb.join(' · ')}</i>`:'');
+  const fields=[['b',n.name],['span',n.path],
+    ['em',`${REGION_NAME[n.c]} · ${DIRS[n.c]} · ${adj[i].length} links`]];
+  if(nb.length)fields.push(['i',`linked: ${nb.join(' · ')}`]);
+  card.replaceChildren(...fields.map(([tag,text])=>{
+    const el=document.createElement(tag);el.textContent=text;return el;
+  }));
   card.style.display='block';
 }
 
@@ -1348,7 +1351,9 @@ const ROW=[];
     members.sort((a,b)=>(neurons[b].hot||neurons[b].deg)-(neurons[a].hot||neurons[a].deg));
     for(const i of members){
       const d=document.createElement('div'); d.className='frow'; d.dataset.i=i;
-      d.innerHTML=`<i style="background:${regColor(neurons[i].c%8)}"></i><span>${neurons[i].name}</span>`;
+      const dot=document.createElement('i');dot.style.background=regColor(neurons[i].c%8);
+      const label=document.createElement('span');label.textContent=neurons[i].name;
+      d.append(dot,label);
       d.onclick=()=>selectFile(i,true);
       frag.appendChild(d); ROW[i]=d; }
   }
