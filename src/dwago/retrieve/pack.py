@@ -25,6 +25,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..source import read_source_lines
+
 __all__ = ["ContextPack", "build_pack", "estimate_tokens"]
 
 # Conservative: code tokenizes worse than prose (punctuation, long identifiers),
@@ -94,11 +96,7 @@ def _read_slice(root: Path, rel: str, start: int | None, end: int | None,
     if not rel or not start:
         return ""
     if rel not in cache:
-        try:
-            cache[rel] = (root / rel).read_text(encoding="utf-8",
-                                                errors="replace").splitlines()
-        except OSError:
-            cache[rel] = []
+        cache[rel] = read_source_lines(root, rel)
     lines = cache[rel]
     if not lines:
         return ""
