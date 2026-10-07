@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
+from .source import resolve_source_file
+
 log = logging.getLogger(__name__)
 
 __all__ = ["Span", "FileSpans", "extract_spans", "extract_repo_spans", "approximate_spans"]
@@ -341,12 +343,24 @@ def _walk(node, depth: int = 0) -> Iterator[tuple[object, int]]:
 def extract_spans(path: Path, root: Path | None = None) -> FileSpans | None:
     """Parse one file and return its definition spans, or None if unparseable."""
     language = language_for(path)
-    rel = str(path.relative_to(root)) if root else str(path)
     if language is None:
         return None
 
+    source = path
+    rel = str(path)
+    if root is not None:
+        source = resolve_source_file(root, path.absolute())
+        if source is None:
+            return None
+        try:
+            rel = str(path.absolute().relative_to(root.absolute()))
+        except ValueError:
+            # An explicitly supplied path may use a symlinked spelling of the
+            # selected root. Its resolved target has already passed containment.
+            rel = str(source.relative_to(root.resolve()))
+
     try:
-        raw = path.read_bytes()
+        raw = source.read_bytes()
     except OSError as exc:
         log.debug("unreadable %s: %s", path, exc)
         return None
@@ -531,7 +545,7 @@ _SKIP_DIRS = {".git", ".hg", "node_modules", "__pycache__", ".venv", "venv",
 
 def _iter_source_files(root: Path) -> Iterator[Path]:
     for p in root.rglob("*"):
-        if not p.is_file():
+        if resolve_source_file(root, p) is None:
             continue
         if any(part in _SKIP_DIRS for part in p.parts):
             continue

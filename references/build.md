@@ -21,6 +21,22 @@ a query running during a rebuild never sees a half-written index.
 6. **Embeddings** — encode documents; reuse vectors for nodes whose content
    hash did not change.
 
+## Source files and project scope
+
+Source reads for indexing and context packs stay within the selected project's
+resolved root. File symlinks are supported when their targets remain inside that
+root; their original names remain in citations. Outside targets, missing files
+and broken or looping links supply no source text.
+
+An explicitly selected `--graph` JSON file may live elsewhere. Its nodes and
+edges are still imported when their source files are unavailable or outside the
+project, but those references receive no local source enrichment or snippets.
+
+This path check is not a sandbox against concurrent filesystem changes or an
+untrusted index directory. Upgrading does not remove content already stored in
+old indexes: rebuild to create current records, and restart an MCP server to use
+the rebuilt index. Older epochs remain on disk.
+
 ## Embedding tiers
 
 Resolved at runtime, best available first:

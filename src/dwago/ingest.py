@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .identity import content_hash, node_key
+from .source import read_source_lines
 from .spans import FileSpans, extract_repo_spans
 
 log = logging.getLogger(__name__)
@@ -149,11 +150,7 @@ def _read_slice(root: Path, rel_path: str, start: int, end: int,
                 _cache: dict[str, list[str]]) -> str:
     """Return source lines [start, end] for content hashing and doc building."""
     if rel_path not in _cache:
-        p = root / rel_path
-        try:
-            _cache[rel_path] = p.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            _cache[rel_path] = []
+        _cache[rel_path] = read_source_lines(root, rel_path)
     lines = _cache[rel_path]
     if not lines:
         return ""
@@ -185,11 +182,7 @@ def _extend_flat_ranges(rows: list[dict], root: Path,
         if not path:
             continue
         if path not in line_cache:
-            try:
-                line_cache[path] = (root / path).read_text(
-                    encoding="utf-8", errors="replace").splitlines()
-            except OSError:
-                line_cache[path] = []
+            line_cache[path] = read_source_lines(root, path)
         total = len(line_cache[path])
         if not total:
             continue

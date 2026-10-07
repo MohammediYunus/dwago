@@ -23,6 +23,7 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from .source import resolve_source_file
 from .spans import FileSpans, extract_repo_spans, language_for
 
 log = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ _TS_INDEXES = tuple(f"/index{e}" for e in _TS_EXTS)
 
 def _iter_files(root: Path):
     for p in sorted(root.rglob("*")):
-        if not p.is_file():
+        if resolve_source_file(root, p) is None:
             continue
         rel = p.relative_to(root)
         if any(part in _SKIP_DIRS or part.startswith(".") and part not in (".github",)
@@ -218,10 +219,13 @@ def extract_repo(root: str | Path, *, spans_by_file: dict[str, FileSpans] | None
         is_code = language_for(rel) is not None
         if not (is_doc or is_code):
             continue
+        source = resolve_source_file(root, p)
+        if source is None:
+            continue
         try:
-            if p.stat().st_size > _MAX_DOC_BYTES:
+            if source.stat().st_size > _MAX_DOC_BYTES:
                 continue
-            text = p.read_text(errors="replace")
+            text = source.read_text(errors="replace")
         except OSError:
             continue
         file_texts[rel] = text
