@@ -251,8 +251,23 @@ def ingest(
         label = n.get("label") or str(gid)
         src_file = n.get("source_file") or ""
         clean = _clean_label(label)
+        parsed_file = spans_by_file.get(src_file)
+        source_line = _start_line(n)
 
-        span = span_index.get(src_file, {}).get(clean)
+        # Repeated names need the original location before the name-only fallback.
+        # A declaration line may follow attributes/decorators, so accept its
+        # enclosing span, preferring an exact start and then the tightest range.
+        span = None
+        if parsed_file is not None and source_line is not None:
+            span = min(
+                (s for s in parsed_file.spans
+                 if clean in (s.name, s.qualified_name)
+                 and s.start_line <= source_line <= s.end_line),
+                key=lambda s: (s.start_line != source_line, s.end_line - s.start_line),
+                default=None,
+            )
+        if span is None:
+            span = span_index.get(src_file, {}).get(clean)
         if span is None and src_file in span_index:
             # Second chance: graphify sometimes labels a method bare while the
             # parser qualified it (`Class.method`). Match on the trailing part.
@@ -262,9 +277,8 @@ def ingest(
                     break
 
         kind = _infer_kind(n, span.kind if span else None)
-        parsed_file = spans_by_file.get(src_file)
 
-        start = span.start_line if span else _start_line(n)
+        start = span.start_line if span else source_line
         end = span.end_line if span else start
 
         # A file-level node has no *symbol* span, but it does have a real
