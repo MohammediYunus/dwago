@@ -60,9 +60,9 @@ def cmd_build(args) -> int:
 
     backend = resolve_backend("fast" if args.fast else args.embed_backend, args.model)
     if backend.kind == "none":
-        print("! no embedding backend available — retrieval will be BM25 only.")
-        print("  install one:  pip install 'dwago[dense]'   (best quality)")
-        print("                pip install 'dwago[fast]'    (pure numpy, ~30MB)")
+        print("Embeddings are disabled or unavailable; retrieval will be BM25 only.")
+        print("  Optional embedding setup: "
+              "https://github.com/MohammediYunus/dwago#optional-embeddings")
     else:
         print(f"Embeddings: {backend.model} ({backend.kind} on {backend.device})")
 

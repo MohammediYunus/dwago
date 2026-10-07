@@ -64,27 +64,69 @@ the bare network. Key files rings the hotspots git complains about most.
 
 ## Install
 
-Requires Python 3.10 or newer.
+Requires Python 3.10 or newer and Git. Install from GitHub; dwago is not
+currently published on PyPI.
+
+Start with lexical search and MCP in a virtual environment:
 
 ```bash
-uv tool install "dwago[lexical,fast,mcp] @ git+https://github.com/MohammediYunus/dwago"
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install "dwago[lexical,mcp] @ git+https://github.com/MohammediYunus/dwago"
 ```
 
-From a clone, `pip install -e ".[lexical,fast,mcp]"`. Swap `fast` for `dense`
-to use a sentence-transformer encoder with PyTorch. Retrieval quality and runtime
-depend on the model and repository; compare them with `dwago eval`.
+On Windows, activate with **.venv\Scripts\activate** instead. Installation
+downloads Python packages; this setup does not download embedding models or
+require an API key.
+
+From a clone of this repository, you can instead install in editable mode:
+
+```bash
+python -m pip install -e ".[lexical,mcp]"
+```
 
 ## Use
 
+Run these commands from the project you want to explore. Replace the example
+question with one about your own code:
+
 ```bash
-dwago build . --fast
+dwago build . --embed-backend none
 dwago ask "where is the OIDC issuer configured?"
+dwago stats
+```
+
+This builds a local index and searches it with BM25. To refresh it after edits
+without adding embeddings, run:
+
+```bash
+dwago refresh . --embed-backend none
+```
+
+Maps and history-based evaluation are separate commands:
+
+```bash
 dwago map                # writes dwago-out/brain.html, open it
 dwago eval               # benchmark it on your own history first
 ```
 
 After a commit, `dwago refresh` re-embeds only what changed. Readers never see
 a half-built index; a build publishes atomically or not at all.
+
+## Optional embeddings
+
+To add the small embedding model to the virtual environment above:
+
+```bash
+python -m pip install "dwago[lexical,fast,mcp] @ git+https://github.com/MohammediYunus/dwago"
+dwago build . --fast
+```
+
+The model is downloaded on first use. The **dense** extra enables a
+sentence-transformer encoder with PyTorch instead; see the
+[embedding tiers](references/build.md#embedding-tiers) for installation commands.
+Retrieval quality and runtime depend on the model and repository; compare them
+with **dwago eval**.
 
 ## Works with your agent, or without one
 
@@ -94,6 +136,9 @@ CLI, Cline, Windsurf and Zed all get the same 13 tools:
 ```bash
 dwago serve /path/to/repo
 ```
+
+See the [MCP setup guide](references/mcp.md) to configure the installed
+executable in your agent.
 
 `SKILL.md` is plain markdown instructions with a command table. Claude Code
 users copy it to `~/.claude/skills/dwago/`. Everyone else can paste it into

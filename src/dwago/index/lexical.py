@@ -88,8 +88,9 @@ class LexicalIndex:
         try:
             import bm25s  # noqa: PLC0415
         except ImportError:
-            log.warning("bm25s not installed; lexical retrieval disabled "
-                        "(pip install 'dwago[lexical]')")
+            log.warning("bm25s not installed; lexical retrieval disabled. "
+                        "See the GitHub installation guide: "
+                        "https://github.com/MohammediYunus/dwago#install")
             return cls()
 
         rows = list(store.conn.execute(
