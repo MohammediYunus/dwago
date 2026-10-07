@@ -1,97 +1,64 @@
 # The benchmark
 
-Any claim that this retrieves well is worthless unless it is a
-measured number on your own repository — including when the answer is "it
-doesn't". `dwago eval` produces that number.
+Use dwago eval to compare retrieval configurations on tasks drawn from your
+repository's history. Results describe this benchmark, with the limitations below.
 
 ```bash
-dwago eval .              # ladder over 200 held-out changes
-dwago eval . -n 500 --split 0.7
+dwago eval .              # ladder over up to 200 held-out changes
+dwago eval . -n 500 --split 0.7 --out evaluation.json
 ```
 
 ## Ground truth
 
 For each historical change, the query is what the author wrote about the work
-(commit subject and body) and the correct answer is the set of files they
-actually touched. Real task, real label, available in any repository with no
-annotation effort.
+(commit subject and body) and the expected files are those they actually touched.
+This provides a task proxy without manual annotation; it does not measure whether
+an assistant solves the task correctly.
 
 ## Leakage control
 
-Co-change is mined from commit history. If evaluation commits sit inside that
-history, the temporal channel has memorized the answer key. So history is split
-by time: temporal edges come only from commits **before** a cutoff, and only
-commits **after** it are scored. The structural graph is still built from HEAD,
-which is correct — you query the code as it exists now.
+History is split by time: temporal co-change edges come only from commits before
+a cutoff, and commits after it are scored. The structural graph and source index
+still reflect the checkout used for the build. This controls temporal co-change
+leakage; it is not a reconstruction of the entire repository at the cutoff.
 
-`--no-rebuild` skips the leak-free rebuild and is labelled optimistic for that
-reason.
+Passing --no-rebuild skips that temporal-layer rebuild. Interpret those results
+as optimistic if the existing layer contains evaluated commits.
 
 ## Known biases
 
-Stated because they change how the numbers should be read.
-
-- Commit subjects are written *after* the work, in the vocabulary of the
-  implementation. That flatters lexical retrieval relative to how it performs on
-  the questions people actually ask mid-task, so **improvements over BM25 here
-  are conservative**.
-- Files renamed or deleted since the cutoff are dropped rather than counted as
-  misses; that is history moving, not retrieval failing.
-- Lockfiles and generated artifacts are excluded — they co-occur with everything.
-- Version bumps, merges and pure-formatting commits are skipped; retrieval
-  cannot localize "bump to 1.2.3".
+- Commit subjects are written after the work, in the vocabulary of the
+  implementation. This can favor lexical retrieval. Gains on these queries do
+  not establish gains on questions people ask while working.
+- Files that are no longer tracked in the current checkout are omitted from the labels.
+- Lockfiles and common generated paths are excluded because they often co-occur
+  with many unrelated files.
+- Merge, release, dependency-bump and some formatting changes are skipped by
+  commit-message filters.
 
 ## Reading the output
 
-Rungs are compared with a **paired** bootstrap: both configurations answer the
-same queries, and variance between queries dwarfs the difference between
-systems, so an unpaired test would drown a real effect.
+Each rung is a retrieval configuration evaluated on the same queries.
 
-Measured on a 1,400-commit OSS Python repository — 150 held-out changes, leak-free split,
-`--fast` (potion-base-8M) embeddings:
+- R@k is the mean fraction of changed files found in the first k retrieved files.
+- MRR is the mean reciprocal rank of the first matching file.
+- s/query is the mean query time for that run.
+- Paired bootstrap intervals compare recall differences on the same tasks.
+  The report compares consecutive rungs at R@20 and the first and last rungs
+  at each reported k. An interval spanning zero does not establish an improvement.
 
-| rung | R@1 | R@5 | R@10 | R@20 | MRR | s/query |
-|---|---|---|---|---|---|---|
-| bm25 | 0.275 | 0.583 | 0.789 | 0.827 | 0.689 | 0.000 |
-| dense | 0.256 | 0.501 | 0.644 | 0.790 | 0.624 | 0.004 |
-| hybrid | 0.289 | 0.697 | 0.812 | 0.834 | 0.698 | 0.003 |
-| hybrid+ppr | 0.283 | **0.715** | 0.825 | **0.849** | 0.691 | 0.014 |
+These metrics do not include precision or end-to-end coding task success.
+Compare recall at the result count you plan to use, together with query latency.
+The evaluation reports results; it does not change retrieval defaults for you.
 
-**Pairwise, on R@20:**
+## Sharing a result
 
-- `bm25 → dense` −0.036 [−0.072, +0.000] — not significant
-- `dense → hybrid` +0.043 [+0.015, +0.071] — significant
-- `hybrid → hybrid+ppr` +0.016 [+0.003, +0.030] — significant
+To make your results reproducible, include:
 
-**End to end, bm25 → hybrid+ppr, tested at every k:**
+- The public repository URL and commit, plus the dwago version or commit.
+- Build and evaluation commands, including split, seed, model and history limits.
+- The evaluation JSON saved with --out, alongside the printed report.
+- Hardware and model-cache state when reporting timings.
 
-| | baseline | full stack | gain | 95% CI | |
-|---|---|---|---|---|---|
-| R@1 | 0.275 | 0.283 | +0.009 | [−0.029, +0.051] | not significant |
-| R@5 | 0.583 | **0.715** | **+0.132** | [+0.084, +0.182] | **significant** |
-| R@10 | 0.789 | 0.825 | +0.036 | [+0.009, +0.064] | significant |
-| R@20 | 0.827 | 0.849 | +0.023 | [−0.000, +0.048] | not significant |
-
-Read this carefully rather than quoting one number.
-
-**The gain is real and it is concentrated at R@5.** That is the regime that
-matters: a context pack shows a handful of results, not twenty. Getting the
-right file into the top five 71.5% of the time instead of 58.3% is the
-difference between the agent reading the right code first and reading around it.
-
-**At R@20 the improvement does not clear its confidence interval**, because BM25
-is already at 0.827 and there is almost no headroom left. Reporting only R@20
-would understate the system; reporting only R@5 would overstate it. Both are
-here.
-
-**Dense alone is worse than BM25** (−0.036, not significant). A real result, not
-a bug: static 256-dimension embeddings are weak, and commit subjects favour
-lexical matching. Fusion still helps substantially — the two retrievers fail on
-*different* queries, which is exactly what RRF exploits — but re-run with the
-full encoder (`pip install 'dwago[dense]'`) before concluding anything about
-the dense tier on your own repository.
-
-## Decision rule
-
-A tier ships on by default only if its rung beats the previous rung's confidence
-interval. Otherwise it ships off by default and this file says so.
+Report uncertainty and regressions as well as improvements. A result from one
+repository does not establish that an encoder is better for every codebase.

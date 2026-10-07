@@ -2,10 +2,11 @@
 
 Ask your codebase anything.
 
-`dwago build .` parses every file and symbol with tree-sitter, resolves the
-imports, groups the files into communities, and mines your git history. Then
+`dwago build .` indexes supported source files and definitions with tree-sitter,
+infers import links, groups files into communities, and mines your git history. Then
 you ask questions in plain English and get answers that cite `file:line`.
-No API key. Nothing leaves your machine.
+Indexing and search run locally without an API key. Embedding modes may download
+model weights on first use; optional summarization uses the backend you choose.
 
 ![the brain map](docs/images/brain.jpg)
 
@@ -28,12 +29,11 @@ double charging". Semantic search can. dwago runs BM25 and embeddings
 together, fuses the rankings, then lets relevance flow along import and
 co-change edges so the neighborhood of a good hit surfaces too.
 
-I don't ask you to take any of this on faith. `dwago eval` replays your own
-git history as a benchmark, time-split so the index can't peek at the answers,
-with confidence intervals on every comparison. On the two repositories I've
-measured, the fused pipeline beat plain BM25 at recall@20 and lost a little
-precision at the top on one of them with the small encoder. The tool reports
-both. If it loses on your repo, believe your numbers, not this README.
+`dwago eval` compares retrieval modes using tasks from your git history. It
+excludes held-out commits from the co-change layer; the source index still
+reflects the checkout you built. Results include recall, mean reciprocal rank,
+query timing, and paired confidence intervals for recall differences.
+See [how the evaluation works](references/eval.md) before interpreting a result.
 
 ## The strike
 
@@ -71,12 +71,13 @@ uv tool install "dwago[lexical,fast,mcp] @ git+https://github.com/MohammediYunus
 ```
 
 From a clone, `pip install -e ".[lexical,fast,mcp]"`. Swap `fast` for `dense`
-if you want the full encoder; it needs torch and it is slower and better.
+to use a sentence-transformer encoder with PyTorch. Retrieval quality and runtime
+depend on the model and repository; compare them with `dwago eval`.
 
 ## Use
 
 ```bash
-dwago build . --fast     # a 2,000-file monorepo takes about a minute
+dwago build . --fast
 dwago ask "where is the OIDC issuer configured?"
 dwago map                # writes dwago-out/brain.html, open it
 dwago eval               # benchmark it on your own history first
@@ -99,16 +100,18 @@ users copy it to `~/.claude/skills/dwago/`. Everyone else can paste it into
 AGENTS.md or point their rules file at it. There is nothing vendor-specific
 in it.
 
-And the CLI needs no agent at all. The one feature that calls a model is
-`dwago summarize`, and its backend is whatever you have, `OPENAI_API_KEY`,
-`ANTHROPIC_API_KEY`, a local `claude` CLI, or nothing. Skip it and everything
-else still works.
+The CLI also works without an agent. Optional summaries can use OpenAI,
+Anthropic, or an installed Claude CLI. They send community file paths and symbol
+names to the selected backend. Indexing, search, and graph tools work without
+summaries.
 
 ## Languages
 
 Python, TypeScript, TSX, JavaScript, Go, Rust, Java, C, C++, C#, Ruby, PHP,
-plus Markdown and RST as document nodes. Import edges are resolved exactly for
-Python and TypeScript/JavaScript. The other languages still get containment,
+plus Markdown and RST as document nodes. Import edges use text-based resolution
+for Python and TypeScript/JavaScript. It can miss imports or infer false links:
+for example, Python multi-import statements, dynamic JavaScript imports, and
+commented import text are not handled fully. The other languages still get containment,
 communities and the whole git layer. If you already have a node-link
 `graph.json` from another tool, `dwago build --graph path.json` ingests it.
 
@@ -116,8 +119,9 @@ communities and the whole git layer. If you already have a node-link
 
 `tests_for` is a coupling heuristic and says so in its own output; coverage
 ingestion would make it exact. Co-change is correlation, and the tool reports
-lift and p-values so you can judge. The small encoder trades accuracy for
-speed, measurably. Above 200k nodes, nearest-neighbor search still needs an
+lift and p-values so you can judge. Retrieval quality depends on the repository
+and embedding model; use `dwago eval` to compare configurations.
+Above 200k nodes, nearest-neighbor search still needs an
 ANN index I haven't wired in. Tests cover extraction, retrieval, storage,
 graph tools, and visualization.
 
