@@ -139,12 +139,17 @@ def _imports_of(rel: str, text: str, files: set[str]) -> set[str]:
 
 def _communities(files: list[str], fedges: list[tuple[str, str]]) -> dict[str, tuple[int, str]]:
     """file → (community id, community name). Louvain over the import graph;
-    files the graph says nothing about are grouped by their top directory."""
+    files the graph says nothing about are grouped by their top directory.
+
+    Canonical ordering keeps unchanged graphs stable within the same
+    Python/NetworkX runtime and default backend, regardless of hash seed.
+    """
     import networkx as nx
 
     g = nx.Graph()
-    g.add_nodes_from(files)
-    g.add_edges_from(fedges)
+    # A fixed RNG seed alone does not remove Louvain's input-order sensitivity.
+    g.add_nodes_from(sorted(files))
+    g.add_edges_from(sorted({(min(a, b), max(a, b)) for a, b in fedges}))
 
     try:
         comms = nx.community.louvain_communities(g, seed=42)
@@ -178,12 +183,14 @@ def _communities(files: list[str], fedges: list[tuple[str, str]]) -> dict[str, t
                 break
         if common:
             return "/".join(common)
-        return Counter(topdir(f) for f in members).most_common(1)[0][0]
+        counts = Counter(topdir(f) for f in members)
+        return min(counts, key=lambda directory: (-counts[directory], directory))
 
     out: dict[str, tuple[int, str]] = {}
-    for i, members in enumerate(sorted(real, key=len, reverse=True)):
+    ordered = sorted(real, key=lambda members: (-len(members), sorted(members)))
+    for i, members in enumerate(ordered):
         nm = name_of(members)
-        for f in members:
+        for f in sorted(members):
             out[f] = (i, nm)
     return out
 

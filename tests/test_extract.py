@@ -1,11 +1,16 @@
 """Standalone extraction: walker, symbols, import resolution, communities."""
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
+import random
+import subprocess
+import sys
 
 import pytest
 
-from dwago.extract import _resolve_ts, extract_repo
+from dwago.extract import _communities, _resolve_ts, extract_repo
 from dwago.ingest import ingest
 from dwago.store import Store
 
@@ -80,3 +85,84 @@ def test_extract_end_to_end(tmp_path):
         "SELECT community_name FROM nodes WHERE source_file='app/auth.py' "
         "AND kind='file'").fetchone()
     assert row is not None and row["community_name"]
+
+
+def test_communities_ignore_logical_input_order():
+    files = [f"group{i}/f{i}.py" for i in range(9)]
+    edges = [(files[i], files[(i + 1) % len(files)]) for i in range(len(files))]
+    expected = _communities(files, edges)
+    for seed in range(12):
+        rng = random.Random(seed)
+        reordered_files = files.copy()
+        # Reversing or repeating an edge does not change an undirected graph.
+        reordered_edges = edges + [(b, a) for a, b in edges]
+        rng.shuffle(reordered_files)
+        rng.shuffle(reordered_edges)
+        assert _communities(reordered_files, reordered_edges) == expected
+
+
+@pytest.mark.parametrize(("files", "expected_name"), [
+    (["beta/a.py", "beta/b.py", "alpha/c.py", "alpha/d.py"], "alpha"),
+    (["alpha/a.py", "beta/b.py", "beta/c.py", "beta/d.py"], "beta"),
+    (["pkg/sub/a.py", "pkg/sub/b.py", "pkg/sub/c.py"], "pkg/sub"),
+    (["a.py", "b.py", "c.py"], "(root)"),
+])
+def test_community_names_keep_common_paths_and_majorities(files, expected_name):
+    edges = [(a, b) for i, a in enumerate(files) for b in files[i + 1:]]
+    assert set(_communities(files, edges).values()) == {(0, expected_name)}
+
+
+def test_isolated_communities_keep_size_order_with_stable_ties():
+    assert _communities([], []) == {}
+    files = ["z/a.py", "z/b.py", "beta/a.py", "alpha/a.py"]
+    assert _communities(files, []) == {
+        "z/a.py": (0, "z"), "z/b.py": (0, "z"),
+        "alpha/a.py": (1, "alpha"), "beta/a.py": (2, "beta"),
+    }
+
+
+@pytest.mark.parametrize("fixture", ["pair", "clique", "cycle"])
+def test_extracted_community_metadata_survives_hash_randomization(tmp_path, fixture):
+    if fixture == "pair":
+        files = ["alpha/a.py", "beta/b.py"]
+        edges = [(0, 1)]
+    elif fixture == "clique":
+        files = ["alpha/a.py", "alpha/b.py", "beta/c.py", "beta/d.py"]
+        edges = [(i, j) for i in range(4) for j in range(i + 1, 4)]
+    else:
+        files = [f"group{i}/f{i}.py" for i in range(9)]
+        edges = [(i, (i + 1) % len(files)) for i in range(len(files))]
+
+    for i, rel in enumerate(files):
+        neighbors = sorted({b if a == i else a for a, b in edges if i in (a, b)})
+        imports = [f"import {files[j][:-3].replace('/', '.')}\n" for j in neighbors]
+        path = tmp_path / rel
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("".join(imports) + "\ndef marker():\n    pass\n")
+
+    script = """
+import json
+import sys
+from dwago.extract import extract_repo
+graph = extract_repo(sys.argv[1])
+print(json.dumps({
+    "communities": {n["id"]: [n["community"], n["community_name"]]
+                    for n in graph["nodes"]},
+    "imports": sorted([e["source"], e["target"]] for e in graph["links"]
+                      if e["relation"] == "imports"),
+}))
+"""
+    results = []
+    for seed in (0, 1, 2, 7):
+        proc = subprocess.run(
+            [sys.executable, "-c", script, str(tmp_path)],
+            env={**os.environ, "PYTHONHASHSEED": str(seed)},
+            capture_output=True, text=True, check=True,
+        )
+        results.append(json.loads(proc.stdout))
+    expected_imports = sorted(
+        [files[a], files[b]] for a, b in edges + [(b, a) for a, b in edges]
+    )
+    assert results[0]["imports"] == expected_imports
+    assert len(results[0]["communities"]) == 2 * len(files)  # files and symbols
+    assert all(result == results[0] for result in results[1:])
