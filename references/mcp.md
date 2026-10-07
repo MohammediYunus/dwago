@@ -60,4 +60,4 @@ it will pick the weaker one about half the time. See `coexist.md`.
 | `cycles(min_size)` | file-level dependency cycles (Tarjan SCC) |
 | `diff_impact(rev_range)` | files changed in a range plus the neighbourhood they ripple into |
 | `tests_for(symbol)` | test files coupled by imports + co-change (heuristic until coverage ingestion) |
-| `overview(n)` | largest communities with cached LLM summaries (`dwago summarize`) |
+| **overview(n)** | largest communities with current cached LLM summaries (**dwago summarize**); stale summaries are omitted without a model call |

@@ -78,6 +78,95 @@ def test_summaries_cached(toy_store):
     assert len(get_summaries(toy_store)) == 2
 
 
+@pytest.mark.parametrize("change", [
+    "UPDATE nodes SET content_hash='changed' WHERE community=0",
+    "UPDATE nodes SET node_key='replacement' WHERE idx=0",
+    "UPDATE nodes SET community=2 WHERE community=0",
+    "DELETE FROM nodes WHERE community=0",
+])
+def test_inherited_summaries_match_current_members(toy_store, change):
+    summarize_communities(toy_store, caller=lambda _: "Original summary.")
+    with Store.begin(toy_store.out_dir.parent) as rebuilt:
+        rebuilt.conn.execute(change)
+
+    current = Store.open(toy_store.out_dir.parent)
+    try:
+        changes_before = current.conn.total_changes
+        # A stale first row must not consume the requested result slot.
+        assert get_summaries(current, 1) == [
+            {"community": 1, "name": "comm1", "summary": "Original summary."},
+        ]
+        assert get_summaries(current, 0) == []
+        assert get_summaries(current, -1) == get_summaries(current, 1)
+        assert current.conn.total_changes == changes_before
+        assert current.conn.execute(
+            "SELECT COUNT(*) FROM community_summaries").fetchone()[0] == 2
+        # Existing readers retain the complete, valid previous epoch.
+        assert len(get_summaries(toy_store)) == 2
+    finally:
+        current.close()
+
+
+def test_cached_summaries_use_current_names(toy_store):
+    calls = []
+    summarize_communities(toy_store, caller=lambda prompt: calls.append(prompt) or "Summary.")
+    toy_store.conn.execute("UPDATE nodes SET community_name='' WHERE community=0")
+    toy_store.conn.execute("UPDATE nodes SET community_name='renamed' WHERE idx=2")
+    toy_store.conn.execute("UPDATE nodes SET community_name=NULL WHERE community=1")
+    rows = get_summaries(toy_store, -1)
+    assert [row["name"] for row in rows] == ["renamed", "community 1"]
+    result = summarize_communities(toy_store, caller=lambda prompt: calls.append(prompt) or "New.")
+    assert result["cached"] == 2 and result["written"] == 0
+    assert len(calls) == 2
+
+
+def test_failed_summary_refresh_does_not_expose_old_text(toy_store):
+    summarize_communities(toy_store, caller=lambda _: "Old summary.")
+    toy_store.conn.execute("UPDATE nodes SET content_hash='changed' WHERE community=0")
+
+    def fail(_):
+        raise RuntimeError("summary backend unavailable")
+
+    result = summarize_communities(toy_store, caller=fail)
+    assert result["cached"] == 1 and result["skipped"] == 1
+    assert len(result["errors"]) == 1
+    assert [row["community"] for row in get_summaries(toy_store)] == [1]
+
+    result = summarize_communities(toy_store, caller=lambda _: "Updated summary.")
+    assert result["written"] == result["cached"] == 1
+    assert [row["summary"] for row in get_summaries(toy_store)] == [
+        "Updated summary.", "Old summary.",
+    ]
+
+
+def test_overview_omits_stale_summaries(toy_store):
+    pytest.importorskip("mcp")
+    import asyncio
+    from dwago.serve import build_server
+
+    summarize_communities(toy_store, caller=lambda _: "Obsolete architecture.")
+    toy_store.conn.execute("UPDATE nodes SET content_hash='changed'")
+    toy_store.conn.commit()
+    server = build_server(toy_store.out_dir.parent)
+
+    async def run():
+        result = await server.call_tool("overview", {})
+        content = getattr(result, "content", result)
+        return "\n".join(getattr(c, "text", str(c)) for c in content)
+
+    text = asyncio.run(run())
+    assert "Obsolete architecture." not in text
+    assert "No current community summaries" in text
+    assert "dwago summarize" in text
+
+
+def test_summaries_limit_selects_largest_current_community(toy_store):
+    toy_store.conn.execute("DELETE FROM nodes WHERE idx=0")
+    summarize_communities(toy_store, caller=lambda _: "Summary.")
+    assert [row["community"] for row in get_summaries(toy_store, 1)] == [1]
+    assert [row["community"] for row in get_summaries(toy_store, -1)] == [1, 0]
+
+
 @pytest.mark.parametrize("tool,kwargs,expect", [
     ("path", dict(from_symbol="a.ts", to_symbol="c.ts"), "hops"),
     ("cycles", dict(min_size=2), "cycle"),

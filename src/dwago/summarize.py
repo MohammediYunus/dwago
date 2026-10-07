@@ -38,6 +38,19 @@ def _members_digest(rows) -> str:
     return h.hexdigest()
 
 
+def _community_members(store: Store) -> tuple[dict[int, list], dict[int, str]]:
+    groups: dict[int, list] = defaultdict(list)
+    names: dict[int, str] = {}
+    for row in store.conn.execute(
+            "SELECT node_key, content_hash, label, kind, source_file,"
+            " community, community_name FROM nodes"
+            " WHERE community IS NOT NULL ORDER BY community, idx"):
+        groups[row["community"]].append(row)
+        if row["community_name"]:
+            names.setdefault(row["community"], row["community_name"])
+    return groups, names
+
+
 def _call_claude_cli(prompt: str, model: str, timeout: int = 90) -> str:
     r = subprocess.run(
         ["claude", "-p", prompt, "--model", model],
@@ -116,16 +129,7 @@ def summarize_communities(store: Store, *, top: int = 20,
             m = model or "haiku"
             caller = lambda p: _call_claude_cli(p, m)  # noqa: E731
 
-    groups: dict[int, list] = defaultdict(list)
-    names: dict[int, str] = {}
-    for r in con.execute(
-            "SELECT node_key, content_hash, label, kind, source_file,"
-            " community, community_name FROM nodes"
-            " WHERE community IS NOT NULL ORDER BY community, idx"):
-        groups[r["community"]].append(r)
-        if r["community_name"]:
-            names.setdefault(r["community"], r["community_name"])
-
+    groups, names = _community_members(store)
     biggest = sorted(groups, key=lambda c: -len(groups[c]))[:top]
     written = cached = 0
     errors: list[str] = []
@@ -160,11 +164,26 @@ def summarize_communities(store: Store, *, top: int = 20,
 
 
 def get_summaries(store: Store, n: int = 20) -> list[dict]:
+    """Return up to n current summaries, largest communities first.
+
+    Cached text must match the members and content of this store's epoch.
+    Reading never regenerates summaries or changes the stored cache.
+    """
     con = store.conn
     try:
         rows = con.execute(
-            "SELECT community, name, summary FROM community_summaries"
-            " LIMIT ?", (n,)).fetchall()
+            "SELECT community, member_hash, summary FROM community_summaries"
+        ).fetchall()
     except Exception:
         return []
-    return [dict(r) for r in rows]
+    if not rows or n == 0:
+        return []
+    cached = {row["community"]: row for row in rows}
+    groups, names = _community_members(store)
+    summaries = [
+        {"community": comm, "name": names.get(comm, f"community {comm}"),
+         "summary": cached[comm]["summary"]}
+        for comm in sorted(groups, key=lambda c: -len(groups[c]))
+        if comm in cached and cached[comm]["member_hash"] == _members_digest(groups[comm])
+    ]
+    return summaries[:n] if n >= 0 else summaries

@@ -448,14 +448,14 @@ def build_server(root: Path):
 
     @server.tool(
         description="Architecture overview: the largest communities with their "
-                    "cached LLM summaries (run `dwago summarize` to populate).")
+                    "current cached LLM summaries (run dwago summarize to populate).")
     def overview(n: int = 12) -> str:
         from .summarize import get_summaries
 
         rows = get_summaries(ctx.store, n)
         if not rows:
-            return ("No community summaries yet. Run `dwago summarize` "
-                    "(needs claude CLI auth or ANTHROPIC_API_KEY).")
+            return ("No current community summaries. Run dwago summarize "
+                    "with your configured summary backend to generate them.")
         out = []
         for r in rows:
             out.append(f"[{r['community']}] {r['name']}")
