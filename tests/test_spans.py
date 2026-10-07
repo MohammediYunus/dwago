@@ -97,6 +97,52 @@ def test_by_name_prefers_top_level_over_method(tmp_path):
     assert "A.run" in idx
 
 
+@pytest.mark.parametrize("prefix", ["", "async "])
+def test_python_decorated_function_has_one_span(tmp_path, prefix):
+    f = tmp_path / "tools.py"
+    f.write_text(
+        "@first\n"
+        "@second('console')\n"
+        f"{prefix}def read_console():\n"
+        '    """Read console messages."""\n'
+        "    def nested():\n"
+        "        return 1\n"
+        "    return nested()\n")
+
+    fs = extract_spans(f, tmp_path)
+    matches = [s for s in fs.spans if s.name == "read_console"]
+    assert len(matches) == 1, "the decorator wrapper and its definition are one symbol"
+    assert (matches[0].start_line, matches[0].end_line) == (1, 7)
+    assert matches[0].signature == f"{prefix}def read_console():"
+    assert matches[0].docstring == "Read console messages."
+    assert [s.name for s in fs.spans] == ["read_console", "nested"], \
+        "skipping the inner declaration must not skip its descendants"
+
+
+def test_python_decorated_classes_keep_distinct_methods(tmp_path):
+    f = tmp_path / "classes.py"
+    f.write_text(
+        "@decorate\n"
+        "class Outer:\n"
+        "    @classmethod\n"
+        "    async def run(cls):\n"
+        "        return 1\n"
+        "\n"
+        "    @decorate\n"
+        "    class Inner:\n"
+        "        @staticmethod\n"
+        "        def run():\n"
+        "            return 2\n")
+
+    fs = extract_spans(f, tmp_path)
+    assert [(s.qualified_name, s.kind, s.start_line, s.end_line) for s in fs.spans] == [
+        ("Outer", "class", 1, 11),
+        ("Outer.run", "method", 3, 5),
+        ("Outer.Inner", "class", 7, 11),
+        ("Outer.Inner.run", "method", 9, 11),
+    ], "retain both same-name methods and the real nested class, once each"
+
+
 def test_oversized_file_is_skipped(tmp_path, monkeypatch):
     import dwago.spans as sp
 

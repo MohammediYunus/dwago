@@ -381,6 +381,14 @@ def extract_spans(path: Path, root: Path | None = None) -> FileSpans | None:
         if kind is None:
             continue
 
+        # The wrapper below already emits this definition with its decorators.
+        # Skip only the inner declaration; _walk still visits its descendants.
+        if (language == "python"
+                and node.type in {"function_definition", "class_definition"}
+                and node.parent is not None
+                and node.parent.type == "decorated_definition"):
+            continue
+
         # Python decorators wrap the real definition; descend to it so the span
         # covers the decorators but the name/kind come from the inner node.
         target = node
