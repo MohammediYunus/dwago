@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict
+from html import escape
 from pathlib import Path
 
 from ..store import Store
@@ -118,10 +119,12 @@ def build_payload(store: Store, *, max_files: int | None = None) -> dict:
 def write_brain(store: Store, out: Path, *, title: str = "dwago",
                 max_files: int | None = None) -> int:
     payload = build_payload(store, max_files=max_files)
+    # Keep graph text inside the script element, including HTML comment markers.
+    payload_json = json.dumps(payload, separators=(',', ':')).replace("<", "\\u003c")
     html = _TEMPLATE.read_text()
     html = html.replace(_MARKER,
-                        f"window.DWAGO_DATA={json.dumps(payload, separators=(',', ':'))};")
-    html = html.replace("<title>The Brain</title>", f"<title>{title} · brain</title>")
+                        f"window.DWAGO_DATA={payload_json};")
+    html = html.replace("<title>The Brain</title>", f"<title>{escape(title)} · brain</title>")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html)
     return len(payload["files"])
