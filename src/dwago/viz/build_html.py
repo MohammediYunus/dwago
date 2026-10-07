@@ -31,6 +31,7 @@ import base64
 import json
 import logging
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -458,13 +459,15 @@ def write_html(store, out: Path, *, title: str = "dwago",
     import html as _h
 
     data = collect_graph_data(store, max_nodes=max_nodes)
-    # `</` must not appear inside the payload script element (an embedded
-    # "</script>" in a code label would truncate it) — escape is JSON-invisible.
-    payload = json.dumps(data).replace("</", "<\\/")
-    html = (_TEMPLATE
-            .replace("__TITLE_JS__", json.dumps(title))
-            .replace("__TITLE__", _h.escape(title))
-            .replace("__DATA__", payload))
+    # Escape script delimiters and comment markers without changing decoded text.
+    replacements = {
+        "__TITLE_JS__": json.dumps(title).replace("<", "\\u003c"),
+        "__TITLE__": _h.escape(title),
+        "__DATA__": json.dumps(data).replace("<", "\\u003c"),
+    }
+    # Replace once so marker-like text in a title or label stays literal.
+    html = re.sub(r"__TITLE_JS__|__TITLE__|__DATA__",
+                  lambda match: replacements[match.group()], _TEMPLATE)
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
