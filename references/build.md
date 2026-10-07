@@ -25,11 +25,25 @@ a query running during a rebuild never sees a half-written index.
 
 Resolved at runtime, best available first:
 
-| Tier | Install | Notes |
+| Tier | Extra | Notes |
 |---|---|---|
-| `Qwen/Qwen3-Embedding-0.6B` | `pip install 'dwago[dense]'` | Default. Apache-2.0. Best quality. |
-| `minishlab/potion-base-8M` | `pip install 'dwago[fast]'` | `--fast`. Pure numpy, ~30MB, no torch. Measurably weaker. |
+| `Qwen/Qwen3-Embedding-0.6B` | **dense** | Default. Apache-2.0. Best quality. |
+| `minishlab/potion-base-8M` | **fast** | `--fast`. Pure numpy, ~30MB, no torch. Measurably weaker. |
 | none | — | BM25 only. Still works. |
+
+Install the extra you want from GitHub in your activated virtual environment.
+These commands retain lexical search and MCP support:
+
+```bash
+# Small, pure-NumPy encoder:
+python -m pip install "dwago[lexical,fast,mcp] @ git+https://github.com/MohammediYunus/dwago"
+
+# Sentence-transformer encoder with PyTorch:
+python -m pip install "dwago[lexical,dense,mcp] @ git+https://github.com/MohammediYunus/dwago"
+```
+
+For a first build without model downloads, follow the
+[no-model quickstart](../README.md#use).
 
 `jinaai/jina-code-embeddings-0.5b` is available via `--model` and is often
 stronger on code-heavy corpora, but check its licence before using it at work —

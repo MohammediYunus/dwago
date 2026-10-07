@@ -484,6 +484,7 @@ def serve(root: Path) -> None:
         server = build_server(root)
     except ImportError:
         raise SystemExit(
-            "MCP support not installed. Run: pip install 'dwago[mcp]'"
+            "MCP support is not installed. See the GitHub installation guide: "
+            "https://github.com/MohammediYunus/dwago#install"
         ) from None
     server.run()

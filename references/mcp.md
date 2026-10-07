@@ -4,20 +4,31 @@
 dwago serve
 ```
 
-Stdio MCP server. Register it with any MCP-capable agent:
+Stdio MCP server. Register it with any MCP-capable agent, using the absolute
+path to the executable in your installed virtual environment:
 
 ```json
 {
   "mcpServers": {
     "dwago": {
-      "command": "dwago",
+      "command": "/absolute/path/to/.venv/bin/dwago",
       "args": ["serve", "/absolute/path/to/project"]
     }
   }
 }
 ```
 
-Requires `pip install 'dwago[mcp]'`.
+On Windows, the executable is **.venv/Scripts/dwago.exe**. A GUI agent may not
+inherit your shell's activated environment, so use the full executable path.
+The project path in **args** is the repository to explore; it does not have to
+be the directory containing the virtual environment.
+
+Install the lexical and MCP extras from GitHub inside an activated Python
+virtual environment (see the [installation guide](../README.md#install)):
+
+```bash
+python -m pip install "dwago[lexical,mcp] @ git+https://github.com/MohammediYunus/dwago"
+```
 
 ## Tools
 
