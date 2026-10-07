@@ -105,6 +105,13 @@ Anthropic, or an installed Claude CLI. They send community file paths and symbol
 names to the selected backend. Indexing, search, and graph tools work without
 summaries.
 
+MCP's architecture overview only returns cached summaries whose members and
+content still match the opened index. After rebuilding, run **dwago summarize**
+with your chosen backend to regenerate summaries for changed communities.
+Reading an overview does not call a model or regenerate missing summaries.
+Restart an already-running MCP server after rebuilding to load the new index;
+its opened index remains a snapshot until then.
+
 ## Languages
 
 Python, TypeScript, TSX, JavaScript, Go, Rust, Java, C, C++, C#, Ruby, PHP,
