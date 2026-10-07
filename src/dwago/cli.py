@@ -42,6 +42,10 @@ def _fmt_int(n: int) -> str:
 
 # ── build ────────────────────────────────────────────────────────────────────
 
+class _EmbeddingConfirmationRequired(Exception):
+    """Roll back an unfinished index before requesting a longer build."""
+
+
 def cmd_build(args) -> int:
     from .enrich.git_temporal import (TemporalConfig, build_temporal_edges,
                                       enrich_store)
@@ -103,7 +107,7 @@ def cmd_build(args) -> int:
                           f"will take roughly {est/60:.0f} min.")
                     print("  re-run with --yes to proceed, or --fast for the "
                           "pure-numpy encoder.")
-                    return 2
+                    raise _EmbeddingConfirmationRequired
                 print("Embedding...")
                 info = build_dense_index(st, emb, force=args.force)
                 emb.release()
@@ -113,6 +117,8 @@ def cmd_build(args) -> int:
                           f"({info.get('seconds', 0)}s)")
                 else:
                     print(f"  all {_fmt_int(info.get('reused', 0))} vectors reused")
+    except _EmbeddingConfirmationRequired:
+        return 2
     except GraphJsonError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
