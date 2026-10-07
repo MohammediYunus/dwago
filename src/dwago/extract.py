@@ -18,6 +18,7 @@ sentence later.
 from __future__ import annotations
 
 import logging
+import posixpath
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -90,12 +91,10 @@ def _resolve_py(module: str, importer: str, files: set[str]) -> str | None:
 def _resolve_ts(spec: str, importer: str, files: set[str]) -> str | None:
     if not spec.startswith("."):
         return None                                    # external package
-    base = (Path(importer).parent / spec)
-    try:
-        base = Path(*base.parts)                       # normalise ../
-    except Exception:  # noqa: BLE001
+    # Collapse parent segments lexically, without consulting the filesystem.
+    base_s = posixpath.normpath(str(Path(importer).parent / spec).replace("\\", "/"))
+    if base_s == ".." or base_s.startswith("../"):
         return None
-    base_s = str(base).replace("\\", "/")
     # exact file, with extension already
     if base_s in files:
         return base_s

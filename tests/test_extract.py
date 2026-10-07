@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dwago.extract import extract_repo
+import pytest
+
+from dwago.extract import _resolve_ts, extract_repo
 from dwago.ingest import ingest
 from dwago.store import Store
 
@@ -23,6 +25,10 @@ def _fixture_repo(tmp_path: Path) -> Path:
         "export function handler() { return helper() }\n")
     (tmp_path / "web" / "util.ts").write_text(
         "export function helper() { return 1 }\n")
+    (tmp_path / "web" / "components").mkdir()
+    (tmp_path / "web" / "components" / "button.tsx").write_text(
+        "import { helper } from '../util'\n"
+        "export function Button() { return helper() }\n")
     (tmp_path / "README.md").write_text("# fixture\n")
     (tmp_path / "node_modules").mkdir()
     (tmp_path / "node_modules" / "junk.js").write_text("x")
@@ -40,10 +46,28 @@ def test_extract_repo(tmp_path):
             if l["relation"] == "imports"}
     assert ("app/auth.py", "app/db.py") in rels, "python import resolved"
     assert ("web/api.ts", "web/util.ts") in rels, "ts relative import resolved"
+    assert ("web/components/button.tsx", "web/util.ts") in rels, \
+        "ts parent-relative import resolved"
     contains = [l for l in data["links"] if l["relation"] == "contains"]
     assert any(l["source"].startswith("app/auth.py::Session") for l in contains), \
         "method nested under its class"
     assert all("community" in n for n in data["nodes"] if n["source_file"])
+
+
+@pytest.mark.parametrize(("spec", "importer", "expected"), [
+    ("../util", "web/components/button.tsx", "web/util.ts"),
+    ("../../util", "web/components/nested/button.tsx", "web/util.ts"),
+    ("../shared", "web/components/button.tsx", "web/shared/index.ts"),
+    ("../util.ts", "web/components/button.tsx", "web/util.ts"),
+    ("./util", "web/api.ts", "web/util.ts"),
+    ("./util.ts", "web/api.ts", "web/util.ts"),
+    ("../../outside", "web/api.ts", None),
+    ("../outside", "api.ts", None),
+    ("react", "web/api.ts", None),
+])
+def test_resolve_ts_relative_paths(spec, importer, expected):
+    files = {"web/util.ts", "web/shared/index.ts", "outside.ts", "../outside.ts"}
+    assert _resolve_ts(spec, importer, files) == expected
 
 
 def test_extract_end_to_end(tmp_path):
