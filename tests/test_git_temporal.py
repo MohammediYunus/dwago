@@ -12,14 +12,13 @@ from dwago.store import Store
 
 
 def _log(*commits: tuple[str, int, str, list[str]]) -> str:
-    """Build synthetic `git log --numstat` output."""
+    """Build synthetic `git log --numstat -z` output."""
     out = []
     for sha, ts, author, files in commits:
-        out.append(f"{_REC}{sha}{_FS}{ts}{_FS}{author}")
-        out.append("")
+        out.append(f"{_REC}{sha}{_FS}{ts}{_FS}{author}\0\n")
         for f in files:
-            out.append(f"1\t1\t{f}")
-    return "\n".join(out)
+            out.append(f"1\t1\t{f}\0")
+    return "".join(out)
 
 
 def test_parse_log_reads_commits_and_files():
@@ -52,7 +51,7 @@ def test_lockfiles_and_changelogs_are_filtered():
 
 
 def test_renames_follow_to_the_new_path():
-    raw = _log(("abc", 1000, "a", ["src/{old.py => new.py}"]))
+    raw = f"{_REC}abc{_FS}1000{_FS}a\0\n0\t0\t\0src/old.py\0src/new.py\0"
     assert _parse_log(raw)[0].files == ["src/new.py"]
 
 
@@ -128,3 +127,89 @@ def test_extracted_paths_join_native_git_history(tmp_path):
         assert row["n_commits"] == 1
         assert row["hotspot"] > 0
         assert store.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 1
+
+
+def test_unicode_and_spaced_paths_keep_source_history(tmp_path, monkeypatch):
+    """Default Git quoting must not create a second history-only file record."""
+    import os
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    paths = ["app/café.py", "app/日本語.py", "app/spaced name.py", "app/plain.py"]
+    if os.name != "nt":
+        paths += ["app/tab\tname.py", "app/new\nline.py", "app/carriage\rreturn.py"]
+    for name in paths:
+        source = tmp_path / name
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("def answer():\n    return 42\n", encoding="utf-8")
+    for args in (("init",), ("add", "app"),
+                 ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                  "-c", "commit.gpgsign=false", "commit", "-m", "Add modules")):
+        subprocess.run(["git", "-C", str(tmp_path), *args],
+                       check=True, capture_output=True)
+
+    commits, result = mine_history(tmp_path)
+    assert result.commits_scanned == 1
+    assert set(commits[0].files) == set(paths)
+    with Store.begin(tmp_path, inherit=False) as store:
+        ingest(tmp_path, store)
+        enrich_store(tmp_path, store)
+        rows = store.conn.execute(
+            "SELECT path, lines, n_commits, hotspot, primary_owner FROM files"
+        ).fetchall()
+        assert {row["path"] for row in rows} == set(paths)
+        for row in rows:
+            assert row["lines"] == 2
+            assert row["n_commits"] == 1
+            assert row["hotspot"] > 0
+            assert row["primary_owner"] == "Fixture"
+
+    # The implementation must not persist a configuration workaround.
+    config = subprocess.run(["git", "-C", str(tmp_path), "config", "--local",
+                             "--get", "core.quotePath"], capture_output=True)
+    assert config.returncode == 1
+
+
+def test_unicode_rename_uses_complete_destination_path(tmp_path, monkeypatch):
+    """Read Git's rename fields rather than reconstructing a display path."""
+    import os
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    before = "café/old name.py"
+    after = "café/nouveau nom.py"
+    source = tmp_path / before
+    source.parent.mkdir(parents=True)
+    source.write_text("def answer():\n    return 42\n", encoding="utf-8")
+    commands = (("init",), ("add", "."),
+                ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                 "-c", "commit.gpgsign=false", "commit", "-m", "Add module"),
+                ("mv", before, after),
+                ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                 "-c", "commit.gpgsign=false", "commit", "-m", "Rename module"))
+    for args in commands:
+        subprocess.run(["git", "-C", str(tmp_path), *args],
+                       check=True, capture_output=True)
+    commits, result = mine_history(tmp_path)
+    assert result.commits_scanned == 2
+    assert commits[0].files == [after]
+    assert commits[1].files == [before]
+
+
+@pytest.mark.parametrize("name", [
+    "café.py", "a b.py", "a\tb.py", "a\nb.py", "a\rb.py", 'a"b.py',
+    r"a\b.py", "a => b.py", " leading.py", "trailing.py ",
+])
+def test_nul_numstat_preserves_literal_path_characters(name):
+    raw = _log(("abc", 1000, "a", [name, "next.py"]))
+    assert _parse_log(raw)[0].files == [name, "next.py"]
+
+
+def test_nul_rename_paths_cannot_be_mistaken_for_records():
+    before = f"{_REC}old\nname.py"
+    after = "new\tname => final.py"
+    raw = (f"{_REC}abc{_FS}1000{_FS}a\0\n0\t0\t\0{before}\0{after}\0"
+           + _log(("def", 900, "b", ["another.py"])))
+    commits = _parse_log(raw)
+    assert commits[0].files == [after]
+    assert commits[1].files == ["another.py"]

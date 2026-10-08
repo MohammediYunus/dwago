@@ -111,11 +111,13 @@ class TemporalResult:
 def _git(root: Path, *args: str, check: bool = True) -> str:
     proc = subprocess.run(
         ["git", "-C", str(root), *args],
-        capture_output=True, text=True, errors="replace",
+        capture_output=True,
     )
+    # Decode explicitly without text mode, which would normalize newlines in paths.
     if check and proc.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)} failed: {proc.stderr.strip()[:300]}")
-    return proc.stdout
+        error = proc.stderr.decode("utf-8", errors="replace").strip()[:300]
+        raise RuntimeError(f"git {' '.join(args)} failed: {error}")
+    return proc.stdout.decode("utf-8", errors="replace")
 
 
 def is_git_repo(root: Path) -> bool:
@@ -134,37 +136,33 @@ class _Commit:
 
 
 def _parse_log(raw: str) -> list[_Commit]:
-    """Parse `git log --numstat` output into commits.
+    """Parse ``git log --numstat -z`` without Git's display-path quoting.
 
-    The format is chosen so records cannot be confused with file lines: a
-    unit-separator-delimited header, then numstat rows until a blank line.
+    Ordinary numstat records contain one path. Rename/copy records have an
+    empty path field followed by separate NUL-terminated old and new paths.
+    Tabs, newlines and display-rename syntax inside a path remain literal.
     """
     commits: list[_Commit] = []
     cur: _Commit | None = None
-
-    # NOT splitlines(): Python treats \x1c, \x1d, \x1e, \x85, \u2028 and \u2029
-    # as line boundaries, so it would swallow the record separator itself and no
-    # line could ever start with it. Splitting on \n only keeps _REC in the text.
-    for line in raw.split(chr(10)):
-        if line.startswith(_REC):
-            parts = line[1:].split(_FS)
-            if len(parts) >= 3:
+    records = iter(raw.split("\0"))
+    for record in records:
+        if record.startswith(_REC):
+            parts = record[1:].split(_FS, 2)
+            if len(parts) == 3:
                 cur = _Commit(sha=parts[0], ts=int(parts[1] or 0), author=parts[2], files=[])
                 commits.append(cur)
             continue
-        if not line.strip() or cur is None:
+        if not record or cur is None:
             continue
-        cols = line.split("\t")
+        # Git inserts a newline before the first numstat row after a header.
+        # Split only the two count fields; whitespace in the path is data.
+        cols = record.lstrip("\n").split("\t", 2)
         if len(cols) < 3:
             continue
         path = cols[2]
-        # Rename entries look like `old/{a => b}/new` or `old => new`; take the
-        # post-rename path so history follows the file forward.
-        if " => " in path:
-            m = re.search(r"\{(.*?) => (.*?)\}", path)
-            path = (path[:m.start()] + m.group(2) + path[m.end():]) if m \
-                else path.split(" => ")[-1].strip("{}")
-        path = path.strip()
+        if not path:
+            next(records, None)  # preimage path
+            path = next(records, None)  # postimage path
         if path and not _NOISE_PATTERNS.search(path):
             cur.files.append(path)
     return commits
@@ -184,7 +182,8 @@ def mine_history(root: Path, config: TemporalConfig | None = None,
     args = [
         "log",
         "--no-merges",                       # a merge's diff double-counts its branch
-        "--numstat",
+        "--numstat", "-z",
+        "--encoding=UTF-8",
         f"--format={_REC}%H{_FS}%at{_FS}%aN",
         f"--max-count={cfg.max_commits}",
     ]
