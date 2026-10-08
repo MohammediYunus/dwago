@@ -291,7 +291,7 @@ class Store:
         return (max(existing) + 1) if existing else 1
 
     def _publish(self, epoch_dir: Path) -> None:
-        """Point `current` at ``epoch_dir`` atomically.
+        """Publish ``epoch_dir`` via an atomic symlink or text-pointer swap.
 
         A symlink cannot be retargeted in place, so build a temporary one beside
         it and rename over the top: ``os.replace`` on a symlink is atomic, so a
@@ -306,15 +306,27 @@ class Store:
             # basename, which would resolve to out_dir/<n> instead of
             # out_dir/epochs/<n> and leave a dangling link.
             target = os.path.relpath(epoch_dir, self.out_dir)
-            os.symlink(target, tmp, target_is_directory=True)
-            os.replace(tmp, current)
-        except OSError:
-            # Filesystems without symlink support (some Windows configs, odd
-            # network mounts) fall back to a pointer file that `open` honours.
-            if tmp.is_symlink() or tmp.exists():
+            try:
+                os.symlink(target, tmp, target_is_directory=True)
+            except OSError:
+                # Publish the complete fallback before removing an old link:
+                # readers prefer that link until the new pointer is ready.
                 tmp.unlink(missing_ok=True)
-            (self.out_dir / "current_epoch.txt").write_text(epoch_dir.name)
-            log.warning("symlinks unavailable; published via current_epoch.txt")
+                tmp.write_text(epoch_dir.name, encoding="utf-8")
+                os.replace(tmp, self.out_dir / "current_epoch.txt")
+                current.unlink(missing_ok=True)
+                log.warning("symlinks unavailable; published via current_epoch.txt")
+            else:
+                # A failed rename is a publication failure, not evidence that
+                # symlinks are unsupported. Leave the old publication intact.
+                os.replace(tmp, current)
+                # Retain any inactive text pointer: a reader that already saw
+                # no link can still finish its lookup on the previous epoch.
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError as exc:
+                log.warning("could not clean temporary pointer %s: %s", tmp, exc)
 
     @staticmethod
     def _prune_epochs(epochs: Path, keep: int = 3) -> None:
