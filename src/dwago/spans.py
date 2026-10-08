@@ -353,11 +353,11 @@ def extract_spans(path: Path, root: Path | None = None) -> FileSpans | None:
         if source is None:
             return None
         try:
-            rel = str(path.absolute().relative_to(root.absolute()))
+            rel = path.absolute().relative_to(root.absolute()).as_posix()
         except ValueError:
             # An explicitly supplied path may use a symlinked spelling of the
             # selected root. Its resolved target has already passed containment.
-            rel = str(source.relative_to(root.resolve()))
+            rel = source.relative_to(root.resolve()).as_posix()
 
     try:
         raw = source.read_bytes()

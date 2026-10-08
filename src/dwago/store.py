@@ -301,6 +301,16 @@ class Store:
         tmp = self.out_dir / f".current.{os.getpid()}.tmp"
         if tmp.exists() or tmp.is_symlink():
             tmp.unlink()
+
+        def publish_pointer() -> None:
+            # Publish the complete fallback before removing an old link:
+            # readers prefer that link until the new pointer is ready.
+            tmp.unlink(missing_ok=True)
+            tmp.write_text(epoch_dir.name, encoding="utf-8")
+            os.replace(tmp, self.out_dir / "current_epoch.txt")
+            current.unlink(missing_ok=True)
+            log.warning("symlink publication unavailable; published via current_epoch.txt")
+
         try:
             # Relative to out_dir, where `current` lives — NOT the bare
             # basename, which would resolve to out_dir/<n> instead of
@@ -309,17 +319,18 @@ class Store:
             try:
                 os.symlink(target, tmp, target_is_directory=True)
             except OSError:
-                # Publish the complete fallback before removing an old link:
-                # readers prefer that link until the new pointer is ready.
-                tmp.unlink(missing_ok=True)
-                tmp.write_text(epoch_dir.name, encoding="utf-8")
-                os.replace(tmp, self.out_dir / "current_epoch.txt")
-                current.unlink(missing_ok=True)
-                log.warning("symlinks unavailable; published via current_epoch.txt")
+                publish_pointer()
             else:
-                # A failed rename is a publication failure, not evidence that
-                # symlinks are unsupported. Leave the old publication intact.
-                os.replace(tmp, current)
+                try:
+                    os.replace(tmp, current)
+                except OSError as exc:
+                    # Windows can create directory symlinks but refuses to
+                    # replace an existing one with MoveFileEx (WinError 5).
+                    # Other rename failures remain publication failures.
+                    if (getattr(exc, "winerror", None) != 5
+                            or not current.is_symlink() or not current.is_dir()):
+                        raise
+                    publish_pointer()
                 # Retain any inactive text pointer: a reader that already saw
                 # no link can still finish its lookup on the previous epoch.
         finally:

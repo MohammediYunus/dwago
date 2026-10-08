@@ -18,7 +18,8 @@ python -m pytest
 On Windows, activate the environment with `.venv\Scripts\activate` instead.
 The test extras include the optional MCP dependency so its tests run too.
 The suite uses local fixtures and needs no model downloads or API keys.
-GitHub Actions runs the same tests on Python 3.10 through 3.14 on Linux.
+GitHub Actions runs the same tests on Python 3.10 through 3.14 on Linux,
+and Python 3.12 on Windows and macOS.
 Optional embedding backends are not exercised by this workflow.
 
 ## Report a problem

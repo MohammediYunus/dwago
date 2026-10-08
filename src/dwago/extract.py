@@ -21,7 +21,7 @@ import logging
 import posixpath
 import re
 from collections import Counter, defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .source import resolve_source_file
 from .spans import FileSpans, extract_repo_spans, language_for
@@ -53,7 +53,8 @@ def _iter_files(root: Path):
         name = p.name
         if name.startswith(".") and p.suffix not in _DOC_EXTS:
             continue
-        yield p, str(rel)
+        # Graph keys use the same slash-separated paths as Git on every OS.
+        yield p, rel.as_posix()
 
 
 # ── import resolution ────────────────────────────────────────────────────────
@@ -70,20 +71,20 @@ def _resolve_py(module: str, importer: str, files: set[str]) -> str | None:
     from the importer's package."""
     dotted = module.lstrip(".")
     rel_up = len(module) - len(module.lstrip("."))
-    bases: list[Path] = [Path("")]
+    bases: list[PurePosixPath] = [PurePosixPath("")]
     if rel_up:
-        base = Path(importer).parent
+        base = PurePosixPath(importer).parent
         for _ in range(rel_up - 1):
             base = base.parent
         bases = [base]
     else:
-        bases.append(Path(importer).parent)
+        bases.append(PurePosixPath(importer).parent)
     parts = dotted.split(".") if dotted else []
     for base in bases:
         for take in range(len(parts), 0, -1):
             stem = base.joinpath(*parts[:take])
             for cand in (f"{stem}.py", f"{stem}/__init__.py"):
-                cand = str(Path(cand))
+                cand = str(PurePosixPath(cand))
                 if cand in files:
                     return cand
     return None
@@ -93,7 +94,7 @@ def _resolve_ts(spec: str, importer: str, files: set[str]) -> str | None:
     if not spec.startswith("."):
         return None                                    # external package
     # Collapse parent segments lexically, without consulting the filesystem.
-    base_s = posixpath.normpath(str(Path(importer).parent / spec).replace("\\", "/"))
+    base_s = posixpath.normpath(str(PurePosixPath(importer).parent / spec))
     if base_s == ".." or base_s.startswith("../"):
         return None
     # exact file, with extension already
@@ -158,7 +159,7 @@ def _communities(files: list[str], fedges: list[tuple[str, str]]) -> dict[str, t
         comms = [{f} for f in files]
 
     def topdir(f: str) -> str:
-        parts = Path(f).parts
+        parts = PurePosixPath(f).parts
         return parts[0] if len(parts) > 1 else "(root)"
 
     # merge singleton communities into per-directory buckets
@@ -173,7 +174,7 @@ def _communities(files: list[str], fedges: list[tuple[str, str]]) -> dict[str, t
     real.extend(s for s in merged.values() if s)
 
     def name_of(members: set) -> str:
-        paths = [Path(f).parts[:-1] for f in members]
+        paths = [PurePosixPath(f).parts[:-1] for f in members]
         if not paths:
             return "misc"
         common: list[str] = []
@@ -231,7 +232,7 @@ def extract_repo(root: str | Path, *, spans_by_file: dict[str, FileSpans] | None
         file_texts[rel] = text
         nodes.append({
             "id": rel,
-            "label": Path(rel).name,
+            "label": PurePosixPath(rel).name,
             "file_type": "document" if is_doc else "code",
             "source_file": rel,
             "source_location": "L1",

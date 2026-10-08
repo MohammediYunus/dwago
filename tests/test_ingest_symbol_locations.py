@@ -1,5 +1,6 @@
 """Repeated symbol names must retain their own parsed source ranges."""
 from contextlib import closing
+from pathlib import Path
 
 import pytest
 
@@ -98,3 +99,22 @@ def test_imported_graph_line_inside_attributed_declaration(tmp_path, label):
         ("integer", 3, 4, "[Marker] public int Read(int value)"),
         ("string", 6, 7, "[Marker] public string Read(string value)"),
     ]
+
+
+def test_imported_native_paths_keep_identity_and_span_enrichment(tmp_path):
+    path = Path("app") / "module.py"
+    source = tmp_path / path
+    source.parent.mkdir()
+    source.write_text("def answer(value):\n    return value\n", encoding="utf-8")
+    native_path = str(path)
+    data = {"nodes": [
+        {"id": "external-symbol", "label": "answer", "file_type": "code",
+         "source_file": native_path, "source_location": "L1"},
+    ], "links": []}
+    with Store.begin(tmp_path) as st:
+        result = ingest(tmp_path, st, data=data)
+        row = st.conn.execute(
+            "SELECT graphify_id, source_file, start_line, end_line, signature "
+            "FROM nodes").fetchone()
+        assert tuple(row) == ("external-symbol", native_path, 1, 2, "def answer(value):")
+        assert result.spans_matched == 1

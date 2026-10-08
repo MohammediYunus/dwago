@@ -121,10 +121,10 @@ def write_brain(store: Store, out: Path, *, title: str = "dwago",
     payload = build_payload(store, max_files=max_files)
     # Keep graph text inside the script element, including HTML comment markers.
     payload_json = json.dumps(payload, separators=(',', ':')).replace("<", "\\u003c")
-    html = _TEMPLATE.read_text()
+    html = _TEMPLATE.read_text(encoding="utf-8")
     html = html.replace(_MARKER,
                         f"window.DWAGO_DATA={payload_json};")
     html = html.replace("<title>The Brain</title>", f"<title>{escape(title)} · brain</title>")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(html)
+    out.write_text(html, encoding="utf-8")
     return len(payload["files"])

@@ -71,6 +71,68 @@ def _read_generation(root):
         st.close()
 
 
+def test_successive_publications_keep_existing_reader_snapshot(tmp_path):
+    _publish_generation(tmp_path, 1)
+    old = Store.open(tmp_path)
+    try:
+        assert old.get_meta("generation") == 1
+        _publish_generation(tmp_path, 2)
+        assert _read_generation(tmp_path) == 2
+        assert old.get_meta("generation") == 1
+    finally:
+        old.close()
+
+
+@pytest.mark.parametrize("failure", [None, "pointer", "unlink"])
+def test_windows_directory_symlink_replace_uses_pointer(tmp_path, monkeypatch,
+                                                       failure):
+    _publish_generation(tmp_path, 1)
+    old = Store.open(tmp_path)
+    out = Store.out_dir_for(tmp_path)
+    current = out / "current"
+    pointer = out / "current_epoch.txt"
+    replace = os.replace
+    unlink = Path.unlink
+    observed = []
+
+    def windows_replace(src, dst):
+        if Path(dst) == current:
+            error = OSError(errno.EACCES, "synthetic Windows directory symlink replacement")
+            error.winerror = 5
+            raise error
+        if Path(dst) == pointer:
+            assert Path(src).read_text() == "000002"
+            assert _read_generation(tmp_path) == 1
+            if failure == "pointer":
+                raise OSError(errno.ENOSPC, "synthetic pointer failure")
+        return replace(src, dst)
+
+    def observe_unlink(path, *args, **kwargs):
+        if path == current:
+            assert pointer.read_text() == "000002"
+            observed.append(_read_generation(tmp_path))
+            if failure == "unlink":
+                raise OSError(errno.EACCES, "synthetic unlink failure")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", windows_replace)
+    monkeypatch.setattr(Path, "unlink", observe_unlink)
+    try:
+        assert old.get_meta("generation") == 1
+        if failure is None:
+            _publish_generation(tmp_path, 2)
+        else:
+            with pytest.raises(OSError, match=f"synthetic {failure} failure"):
+                _publish_generation(tmp_path, 2)
+        assert observed == ([] if failure == "pointer" else [1])
+        assert _read_generation(tmp_path) == (2 if failure is None else 1)
+        assert old.get_meta("generation") == 1
+        assert current.is_symlink() is (failure is not None)
+        assert not list(out.glob(".current*.tmp"))
+    finally:
+        old.close()
+
+
 def _no_symlinks(*args, **kwargs):
     raise OSError(errno.EPERM, "synthetic symlink restriction")
 
