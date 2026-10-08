@@ -4,7 +4,8 @@
 index only becomes visible when the whole build succeeds and its publication
 pointer changes, so a query running during a rebuild never sees a half-written
 index. Publication uses an atomic symlink replacement, or an atomic text-pointer
-replacement when symlink creation is unavailable. Existing readers keep their
+replacement when symlink creation is unavailable or Windows refuses to replace
+an existing directory symlink. Existing readers keep their
 opened epoch; new readers select the newly published one.
 
 ## Stages
@@ -39,6 +40,22 @@ This path check is not a sandbox against concurrent filesystem changes or an
 untrusted index directory. Upgrading does not remove content already stored in
 old indexes: rebuild to create current records, and restart an MCP server to use
 the rebuilt index. Older epochs remain on disk.
+
+## Windows indexes created with 0.3.4 or earlier
+
+Own extraction now uses slash-separated relative paths on every platform, so
+imports, spans and Git history address the same files. Windows indexes created
+with 0.3.4 or earlier can contain backslash keys. After upgrading, rebuild once
+without inheriting those records:
+
+```bash
+dwago build . --force --embed-backend none
+```
+
+This command creates a fresh lexical index without downloading embedding models.
+If you use embeddings, choose your usual backend instead. Restart an MCP server
+to load the rebuilt index. Ordinary refresh does not migrate old file-table keys.
+Imported graph IDs and source paths are retained as supplied.
 
 ## Embedding tiers
 

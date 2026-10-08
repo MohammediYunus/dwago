@@ -33,10 +33,10 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install package and test dependencies
         run: python -m pip install -e ".[dev,lexical,mcp]"
-      - name: Check dependencies and CLI
-        run: |
-          python -m pip check
-          dwago --help
+      - name: Check dependencies
+        run: python -m pip check
+      - name: Check CLI
+        run: dwago --help
       - name: Run tests
         run: python -m pytest
 
@@ -59,10 +59,10 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install package and test dependencies
         run: python -m pip install -e ".[dev,lexical,mcp]"
-      - name: Check dependencies and CLI
-        run: |
-          python -m pip check
-          dwago --help
+      - name: Check dependencies
+        run: python -m pip check
+      - name: Check CLI
+        run: dwago --help
       - name: Report native symlink capability
         shell: python
         run: |

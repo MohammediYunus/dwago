@@ -6,7 +6,9 @@ import subprocess
 import pytest
 
 from dwago.enrich.git_temporal import (_FS, _REC, TemporalConfig, _g_test,
-                                         _parse_log, is_git_repo, mine_history)
+                                         _parse_log, enrich_store, is_git_repo, mine_history)
+from dwago.ingest import ingest
+from dwago.store import Store
 
 
 def _log(*commits: tuple[str, int, str, list[str]]) -> str:
@@ -96,3 +98,33 @@ def test_before_ts_excludes_the_evaluation_window(tmp_path, monkeypatch):
     monkeypatch.setattr(gt, "_git", lambda root, *a, **k: raw if a[0] == "log" else "HEAD")
     commits, _ = gt.mine_history(tmp_path, TemporalConfig(before_ts=1000))
     assert [c.sha for c in commits] == ["old"]
+
+
+def test_extracted_paths_join_native_git_history(tmp_path):
+    """Extraction and Git must address the same nested files on every OS."""
+    source = tmp_path / "app" / "nested" / "module.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("def answer():\n    return 42\n", encoding="utf-8")
+    for args in (("init",), ("add", "app"),
+                 ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                  "-c", "commit.gpgsign=false", "commit", "-m", "Add module")):
+        subprocess.run(["git", "-C", str(tmp_path), *args],
+                       check=True, capture_output=True)
+
+    with Store.begin(tmp_path, inherit=False) as store:
+        result = ingest(tmp_path, store)
+        assert result.spans_matched > 0
+        temporal = enrich_store(tmp_path, store)
+        assert temporal.commits_scanned == 1
+        rows = store.conn.execute(
+            "SELECT n.source_file, f.language, f.lines, f.n_commits, f.hotspot "
+            "FROM nodes n JOIN files f ON n.source_file=f.path WHERE n.kind='file'"
+        ).fetchall()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["source_file"] == "app/nested/module.py"
+        assert row["language"] == "python"
+        assert row["lines"] == 2
+        assert row["n_commits"] == 1
+        assert row["hotspot"] > 0
+        assert store.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 1

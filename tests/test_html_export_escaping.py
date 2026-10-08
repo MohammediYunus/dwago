@@ -62,7 +62,7 @@ def test_html_boundaries_and_metadata_roundtrip(
     title = '</title><x-title> & </ScRiPt><x-script> "quoted" \u2603'
     out = tmp_path / "map.html"
     writer(metadata_store, out, title=title)
-    document = Document(out.read_text())
+    document = Document(out.read_text(encoding="utf-8"))
     assert document.markers == [], "metadata must not create HTML elements"
     assert len(document.scripts) == count
     assert document.title == f"{title} \u00b7 {suffix}"
@@ -84,7 +84,7 @@ def test_title_template_markers_are_literal(tmp_path, metadata_store):
     title = "__TITLE_JS__ __TITLE__ __DATA__"
     out = tmp_path / "map.html"
     write_html(metadata_store, out, title=title)
-    document = Document(out.read_text())
+    document = Document(out.read_text(encoding="utf-8"))
     assert document.title == f"{title} \u00b7 dwago"
     raw = document.scripts[1].split("document.getElementById('brandsub').textContent = ", 1)[1]
     assert json.JSONDecoder().raw_decode(raw)[0] == title

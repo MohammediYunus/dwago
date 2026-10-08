@@ -243,8 +243,10 @@ def ingest(
             continue
         label = n.get("label") or str(gid)
         src_file = n.get("source_file") or ""
+        # Normalize only the lookup; imported graph identities stay untouched.
+        span_path = Path(src_file).as_posix()
         clean = _clean_label(label)
-        parsed_file = spans_by_file.get(src_file)
+        parsed_file = spans_by_file.get(span_path)
         source_line = _start_line(n)
 
         # Repeated names need the original location before the name-only fallback.
@@ -260,11 +262,11 @@ def ingest(
                 default=None,
             )
         if span is None:
-            span = span_index.get(src_file, {}).get(clean)
-        if span is None and src_file in span_index:
+            span = span_index.get(span_path, {}).get(clean)
+        if span is None and span_path in span_index:
             # Second chance: graphify sometimes labels a method bare while the
             # parser qualified it (`Class.method`). Match on the trailing part.
-            for qname, s in span_index[src_file].items():
+            for qname, s in span_index[span_path].items():
                 if qname.rsplit(".", 1)[-1] == clean:
                     span = s
                     break

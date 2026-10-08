@@ -56,7 +56,7 @@ def test_brain_html(toy_store, tmp_path):
     out = tmp_path / "brain.html"
     n = write_brain(toy_store, out, title="toy")
     assert n == 4
-    html = out.read_text()
+    html = out.read_text(encoding="utf-8")
     assert "window.DWAGO_DATA=" in html
     payload = html.split("window.DWAGO_DATA=")[1].split(";\n")[0].split(";const")[0]
     data = json.loads(payload.rstrip(";"))

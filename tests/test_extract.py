@@ -69,9 +69,11 @@ def test_extract_repo(tmp_path):
     ("../../outside", "web/api.ts", None),
     ("../outside", "api.ts", None),
     ("react", "web/api.ts", None),
+    ("./util", r"literal\folder/api.ts", r"literal\folder/util.ts"),
 ])
 def test_resolve_ts_relative_paths(spec, importer, expected):
-    files = {"web/util.ts", "web/shared/index.ts", "outside.ts", "../outside.ts"}
+    files = {"web/util.ts", "web/shared/index.ts", "outside.ts", "../outside.ts",
+             r"literal\folder/util.ts"}
     assert _resolve_ts(spec, importer, files) == expected
 
 
