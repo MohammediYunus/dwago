@@ -103,6 +103,17 @@ without adding embeddings, run:
 dwago refresh . --embed-backend none
 ```
 
+Indexes built with **0.3.5 or earlier** can retain incorrect Git history records
+for non-ASCII filenames. After upgrading, rebuild once to remove those old records;
+ordinary refresh does not remove them:
+
+```bash
+dwago build . --force --embed-backend none
+```
+
+If you use embeddings, replace **none** with your usual backend. Restart any
+running MCP server to load the rebuilt index.
+
 Maps and history-based evaluation are separate commands:
 
 ```bash
