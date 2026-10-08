@@ -1,8 +1,11 @@
 # Build pipeline
 
 `dwago build` runs six stages. Each writes into a new *epoch* directory; the
-index only becomes visible when the whole build succeeds and a symlink flips, so
-a query running during a rebuild never sees a half-written index.
+index only becomes visible when the whole build succeeds and its publication
+pointer changes, so a query running during a rebuild never sees a half-written
+index. Publication uses an atomic symlink replacement, or an atomic text-pointer
+replacement when symlink creation is unavailable. Existing readers keep their
+opened epoch; new readers select the newly published one.
 
 ## Stages
 

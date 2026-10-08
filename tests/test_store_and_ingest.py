@@ -1,7 +1,10 @@
 """Store lifecycle (epochs, atomic publish) and graph.json ingestion."""
 from __future__ import annotations
 
+import errno
 import json
+import os
+from pathlib import Path
 
 import pytest
 
@@ -53,6 +56,158 @@ def test_failed_build_leaves_previous_epoch_intact(tmp_path):
 
     assert Store.open(tmp_path).paths.root.name == first, \
         "a failed build must not change what `current` points at"
+
+
+def _publish_generation(root, generation):
+    with Store.begin(root) as st:
+        st.set_meta("generation", generation)
+
+
+def _read_generation(root):
+    st = Store.open(root)
+    try:
+        return st.get_meta("generation")
+    finally:
+        st.close()
+
+
+def _no_symlinks(*args, **kwargs):
+    raise OSError(errno.EPERM, "synthetic symlink restriction")
+
+
+def test_publication_switches_to_pointer_and_back(tmp_path, monkeypatch):
+    _publish_generation(tmp_path, 1)
+    old = Store.open(tmp_path)
+    assert old.get_meta("generation") == 1
+    out = Store.out_dir_for(tmp_path)
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(os, "symlink", _no_symlinks)
+            _publish_generation(tmp_path, 2)
+            assert _read_generation(tmp_path) == 2
+            assert not (out / "current").is_symlink()
+            assert (out / "current_epoch.txt").read_text() == "000002"
+            assert old.get_meta("generation") == 1
+
+        _publish_generation(tmp_path, 3)
+        assert (out / "current").is_symlink()
+        assert _read_generation(tmp_path) == 3
+        assert old.get_meta("generation") == 1
+    finally:
+        old.close()
+
+
+def test_pointer_publication_replaces_complete_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(os, "symlink", _no_symlinks)
+    _publish_generation(tmp_path, 1)
+    out = Store.out_dir_for(tmp_path)
+    pointer = out / "current_epoch.txt"
+    replace = os.replace
+    observed = []
+
+    def observe_replace(src, dst):
+        if Path(dst) == pointer:
+            assert Path(src).parent == out
+            assert Path(src).read_text() == "000002"
+            assert pointer.read_text() == "000001"
+            observed.append(_read_generation(tmp_path))
+            replace(src, dst)
+            observed.append(_read_generation(tmp_path))
+        else:
+            replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", observe_replace)
+    _publish_generation(tmp_path, 2)
+    assert observed == [1, 2]
+    assert not list(out.glob(".current*.tmp"))
+
+
+def test_symlink_replace_failure_does_not_publish_pointer(tmp_path, monkeypatch):
+    _publish_generation(tmp_path, 1)
+    out = Store.out_dir_for(tmp_path)
+    current = out / "current"
+    replace = os.replace
+
+    def fail_current_replace(src, dst):
+        if Path(dst) == current:
+            raise OSError(errno.EACCES, "synthetic rename restriction")
+        return replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", fail_current_replace)
+    with pytest.raises(OSError, match="synthetic rename restriction"):
+        _publish_generation(tmp_path, 2)
+    assert _read_generation(tmp_path) == 1
+    assert not (out / "current_epoch.txt").exists()
+    assert not list(out.glob(".current*.tmp"))
+
+
+@pytest.mark.parametrize("initial_pointer", [False, True])
+def test_pointer_replace_failure_preserves_publication(tmp_path, monkeypatch,
+                                                       initial_pointer):
+    if initial_pointer:
+        monkeypatch.setattr(os, "symlink", _no_symlinks)
+    _publish_generation(tmp_path, 1)
+    out = Store.out_dir_for(tmp_path)
+    pointer = out / "current_epoch.txt"
+    monkeypatch.setattr(os, "symlink", _no_symlinks)
+    replace = os.replace
+
+    def fail_pointer_replace(src, dst):
+        if Path(dst) == pointer:
+            raise OSError(errno.EACCES, "synthetic pointer rename restriction")
+        return replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", fail_pointer_replace)
+    with pytest.raises(OSError, match="synthetic pointer rename restriction"):
+        _publish_generation(tmp_path, 2)
+    assert _read_generation(tmp_path) == 1
+    if initial_pointer:
+        assert pointer.read_text() == "000001"
+    else:
+        assert not pointer.exists()
+    assert not list(out.glob(".current*.tmp"))
+
+
+def test_fallback_does_not_report_success_if_old_link_cannot_be_removed(
+        tmp_path, monkeypatch):
+    _publish_generation(tmp_path, 1)
+    current = Store.out_dir_for(tmp_path) / "current"
+    unlink = Path.unlink
+
+    def fail_current_unlink(path, *args, **kwargs):
+        if path == current:
+            raise OSError(errno.EACCES, "synthetic unlink restriction")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "symlink", _no_symlinks)
+    monkeypatch.setattr(Path, "unlink", fail_current_unlink)
+    with pytest.raises(OSError, match="synthetic unlink restriction"):
+        _publish_generation(tmp_path, 2)
+    assert _read_generation(tmp_path) == 1
+
+
+def test_reader_can_finish_pointer_lookup_during_switch_to_symlink(
+        tmp_path, monkeypatch):
+    with monkeypatch.context() as m:
+        m.setattr(os, "symlink", _no_symlinks)
+        _publish_generation(tmp_path, 1)
+    current = Store.out_dir_for(tmp_path) / "current"
+    exists = Path.exists
+    published = False
+
+    def publish_after_link_check(path):
+        nonlocal published
+        found = exists(path)
+        if path == current and not published:
+            assert not found
+            published = True
+            _publish_generation(tmp_path, 2)
+        return found
+
+    monkeypatch.setattr(Path, "exists", publish_after_link_check)
+    assert _read_generation(tmp_path) == 1
+    assert published
+    assert _read_generation(tmp_path) == 2
 
 
 def test_missing_graph_json_explains_how_to_fix(tmp_path):
