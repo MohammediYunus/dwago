@@ -204,7 +204,7 @@ def cmd_impact(args) -> int:
         for h in static[:args.k]:
             print(f"  {h.label[:50]:52} {h.location()}")
     if temporal:
-        print("\nHistorically changes alongside:")
+        print("\nReached through co-change history:")
         for h in temporal[:args.k]:
             print(f"  {h.label[:50]:52} {h.location()}")
     if not res.hits:

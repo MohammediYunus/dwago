@@ -46,14 +46,18 @@ diffusion a no-op whenever `seed_k` exceeds the result count.
 
 ## Two channels
 
-Structural edges (calls, imports, inheritance) and temporal edges (co-change)
-are diffused **separately** and combined afterwards, each row-normalized in its
-own channel.
+Structural edges (calls, imports, inheritance) and temporal edges are diffused
+**separately** and combined afterwards, each row-normalized in its own channel.
+The temporal channel includes both co-change pairs and links between a symbol
+and its own file.
 
-Mixing them in one walk lets co-change hubs — a settings file that moves with
-everything — absorb mass belonging to the call graph. Separation also keeps the
-signals *distinguishable*, which is what lets every result say whether it is
-here because it is called or because it always changes with you.
+Mixing them in one walk lets co-change hubs absorb mass belonging to the call
+graph. Result explanations distinguish same-file context from retained co-change
+links connected to the query's seed files. A direct pair is labeled as a file
+co-changing with a matched file; a longer chain is labeled as a connection
+through co-change history. Neither means that the files always change together.
+Explanations use only contributing channels, including the single-channel
+fallback when the other channel is unavailable.
 
 `--temporal-weight` (default 0.3) sets the blend. It is a fitted parameter, not
 a claim; `dwago eval` can tune it per repository.

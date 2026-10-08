@@ -114,7 +114,7 @@ def build_server(root: Path):
     @server.tool(
         description=(
             "What a change to this symbol reaches: callers and dependents from code "
-            "structure, PLUS files that historically change alongside it and who "
+            "structure, PLUS files connected through co-change history and who "
             "owns them. The historical half has no static equivalent - it catches "
             "coupling no parser can see."
         )
@@ -130,7 +130,7 @@ def build_server(root: Path):
         parts = [f"Impact of {symbol}:", "", "Reached through code structure:",
                  _fmt_hits(static, k) if static else "  (none)"]
         if temporal:
-            parts += ["", "Historically changes alongside (no static link):",
+            parts += ["", "Reached through co-change history:",
                       _fmt_hits(temporal, k)]
 
         files = {h.source_file for h in res.hits[:10] if h.source_file}
