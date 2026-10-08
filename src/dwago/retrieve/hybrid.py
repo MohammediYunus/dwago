@@ -112,6 +112,18 @@ class Retriever:
                 "FROM nodes"
             )
         }
+        # Match the opened Store snapshot, as with node metadata and indexes.
+        # Containment in the temporal channel is not evidence of co-change.
+        self._cochange_neighbors: dict[str, set[str]] = {}
+        for edge in store.conn.execute(
+            "SELECT src, dst FROM edges WHERE channel='temporal' "
+            "AND relation='co_changes_with'"
+        ):
+            a = self._meta.get(edge["src"], {}).get("source_file")
+            b = self._meta.get(edge["dst"], {}).get("source_file")
+            if a and b and a != b:
+                self._cochange_neighbors.setdefault(a, set()).add(b)
+                self._cochange_neighbors.setdefault(b, set()).add(a)
 
     # ── stage 0 ──────────────────────────────────────────────────────────────
 
@@ -244,6 +256,18 @@ class Retriever:
         # blend keeps direct hits on top (they score on both terms) while still
         # letting a strongly-connected non-seed outrank a marginal one.
         seed_idx = {i for i, _ in seeds}
+        seed_files = {self._meta[i]["source_file"] for i in seed_idx
+                      if self._meta.get(i, {}).get("source_file")}
+        # Explanations follow the channels actually used by combine_channels.
+        # A sole available channel contributes even at the opposite endpoint.
+        explain_s, explain_t = s_scores, t_scores
+        if s_scores is not None and t_scores is not None:
+            weight = float(np.clip(self.temporal_weight, 0.0, 1.0))
+            if weight <= 0:
+                explain_t = None
+            if weight >= 1:
+                explain_s = None
+        history_files = self._history_files(seed_files) if explain_t is not None else set()
         fused_peak = max((s for _, s in ranked), default=0.0) or 1.0
         ppr_peak = float(combined.max()) or 1.0
         fused_norm = {i: s / fused_peak for i, s in ranked}
@@ -258,7 +282,8 @@ class Retriever:
             # selection); apply it to the diffusion term only, so a node the
             # walk reached is discounted consistently with one retrieved directly.
             score = SEED_WEIGHT * f + (1.0 - SEED_WEIGHT) * pm * self._prior(i)
-            why = "matched query" if i in seed_idx else self._explain(i, s_scores, t_scores)
+            why = "matched query" if i in seed_idx else self._explain(
+                i, explain_s, explain_t, seed_files, history_files)
             scored.append((i, score, why))
 
         scored.sort(key=lambda t: -t[1])
@@ -304,20 +329,35 @@ class Retriever:
             return 0.0 if not self.include_tests else TEST_PRIOR
         return 1.0
 
-    def _explain(self, idx: int, s_scores, t_scores) -> str:
-        """Say which channel put a node in the result.
+    def _history_files(self, seed_files: set[str]) -> set[str]:
+        """Files connected to query seeds by retained co-change edges."""
+        reached = set(seed_files)
+        pending = list(seed_files)
+        while pending:
+            for other in self._cochange_neighbors.get(pending.pop(), ()):
+                if other not in reached:
+                    reached.add(other)
+                    pending.append(other)
+        return reached - seed_files
 
-        Cheap to compute and disproportionately useful: "always changes with
-        your seed" and "is called by your seed" are different claims, and an
-        agent acting on the result should be able to tell them apart.
-        """
+    def _explain(self, idx: int, s_scores, t_scores, seed_files: set[str],
+                 history_files: set[str]) -> str:
+        """Describe active graph support without treating containment as history."""
         s = float(s_scores[idx]) if s_scores is not None else 0.0
         t = float(t_scores[idx]) if t_scores is not None else 0.0
-        if s > 0 and t > 0:
-            return "connected and co-changes"
-        if t > 0:
-            return "co-changes with matches"
-        return "connected to matches"
+        source = self._meta.get(idx, {}).get("source_file")
+        if t > 0 and source in seed_files:
+            return "in the same file as a match"
+        if t > 0 and source in history_files:
+            if self._cochange_neighbors.get(source, set()) & seed_files:
+                history = "file co-changes with a matched file"
+                return f"connected in code; {history}" if s > 0 else history
+            return ("connected through code and co-change history" if s > 0
+                    else "connected through co-change history")
+        if s > 0 or t > 0:
+            return "connected to matches"
+        # A retrieved candidate outside seed_k can survive without graph mass.
+        return "matched query"
 
     def _hit(self, idx: int, score: float, why: str = "") -> Hit:
         m = self._meta.get(idx, {})
