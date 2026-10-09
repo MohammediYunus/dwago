@@ -89,6 +89,46 @@ def test_extract_end_to_end(tmp_path):
     assert row is not None and row["community_name"]
 
 
+def test_ingest_utf8_imports_under_non_utf8_locale(tmp_path):
+    modules = ["plain", "café", "日本語"]
+    for module in modules:
+        (tmp_path / f"{module}.py").write_text(
+            "def answer():\n    return 1\n", encoding="utf-8")
+    imports = "".join(f"from {module} import answer\n" for module in modules)
+    (tmp_path / "consumer.py").write_text(imports, encoding="utf-8")
+
+    script = """
+import json
+import locale
+import sys
+from dwago.ingest import ingest
+from dwago.store import Store
+
+# Change the text locale after startup to preserve Unicode filesystem support.
+locale.setlocale(locale.LC_CTYPE, "C")
+with Store.begin(sys.argv[1], inherit=False) as store:
+    ingest(sys.argv[1], store)
+    imports = [list(row) for row in store.conn.execute(
+        "SELECT source.source_file, target.source_file FROM edges "
+        "JOIN nodes AS source ON source.idx = edges.src "
+        "JOIN nodes AS target ON target.idx = edges.dst "
+        "WHERE edges.relation = 'imports' ORDER BY target.source_file")]
+print(json.dumps({"imports": imports, "utf8_mode": sys.flags.utf8_mode,
+                  "encoding": locale.getpreferredencoding(False)}))
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        env={**os.environ, "PYTHONUTF8": "0"},
+        capture_output=True, check=True, timeout=30,
+    )
+    result = json.loads(proc.stdout)
+    assert result["utf8_mode"] == 0
+    assert imports.encode("utf-8").decode(result["encoding"], errors="replace") != imports
+    assert result["imports"] == [
+        ["consumer.py", f"{module}.py"] for module in sorted(modules)
+    ]
+
+
 def test_communities_ignore_logical_input_order():
     files = [f"group{i}/f{i}.py" for i in range(9)]
     edges = [(files[i], files[(i + 1) % len(files)]) for i in range(len(files))]
