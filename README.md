@@ -111,6 +111,11 @@ ordinary refresh does not remove them:
 dwago build . --force --embed-backend none
 ```
 
+Indexes built with **0.3.7 or earlier** under a non-UTF-8 default text encoding
+may also be missing links for Unicode imports in UTF-8 source files. If affected,
+use the same forced rebuild after upgrading. The **0.3.8** change-impact filename
+fix works with existing valid indexes without a rebuild.
+
 If you use embeddings, replace **none** with your usual backend. Restart any
 running MCP server to load the rebuilt index.
 
