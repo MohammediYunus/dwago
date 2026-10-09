@@ -226,7 +226,7 @@ def extract_repo(root: str | Path, *, spans_by_file: dict[str, FileSpans] | None
         try:
             if source.stat().st_size > _MAX_DOC_BYTES:
                 continue
-            text = source.read_text(errors="replace")
+            text = source.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         file_texts[rel] = text

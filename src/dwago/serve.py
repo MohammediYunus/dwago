@@ -362,12 +362,14 @@ def build_server(root: Path):
 
         try:
             raw = subprocess.run(
-                ["git", "diff", "--name-only", rev_range],
-                cwd=ctx.root, capture_output=True, text=True, timeout=30,
+                ["git", "diff", "--name-only", "-z", rev_range],
+                cwd=ctx.root, capture_output=True, timeout=30,
                 check=True).stdout
         except subprocess.CalledProcessError as e:
-            return f"git diff failed: {e.stderr.strip() or rev_range}"
-        changed = [f for f in raw.splitlines() if f.strip()]
+            error = e.stderr.decode("utf-8", errors="replace").strip()
+            return f"git diff failed: {error or rev_range}"
+        # Git emits literal NUL-delimited paths; text mode would normalize CR/LF.
+        changed = [f for f in raw.decode("utf-8", errors="replace").split("\0") if f]
         if not changed:
             return f"No files changed in {rev_range}."
         con = ctx.store.conn
